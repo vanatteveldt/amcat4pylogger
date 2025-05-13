@@ -18,8 +18,9 @@ LOGGING_FIELDS = dict(
 
 
 class AmCATLogFormatter(logging.Formatter):
-    def __init__(self, *, extra_fields=None, **kargs):
+    def __init__(self, *, extra_fields=None, extra_values=None, **kargs):
         self.extra_fields = extra_fields
+        self.extra_values = extra_values
         super().__init__(**kargs)
 
     def format_to_amcat(self, record: logging.LogRecord):
@@ -32,10 +33,10 @@ class AmCATLogFormatter(logging.Formatter):
             "title": record.getMessage(),
         }
         for field in self.extra_fields:
-            print(field, hasattr(record, field), record)
-
             if hasattr(record, field):
                 doc[field] = getattr(record, field)
+        for field, value in self.extra_values.items():
+            doc[field] = value
 
         if record.exc_info:
             exc_info = sys.exc_info if isinstance(record.exc_info, bool) else record.exc_info
@@ -47,11 +48,13 @@ class AmCATLogFormatter(logging.Formatter):
 
 
 class AmCATLogHandler(logging.Handler):
-    def __init__(self, client: AmcatClient, index: str, extra_fields: Optional[list]):
+    def __init__(
+        self, client: AmcatClient, index: str, extra_fields: Optional[list], extra_values: Optional[dict[str, str]]
+    ):
         self.client = client
         self.index = index
         super().__init__()
-        self.setFormatter(AmCATLogFormatter(extra_fields=extra_fields))
+        self.setFormatter(AmCATLogFormatter(extra_fields=extra_fields, extra_values=extra_values))
 
     def emit(self, record):
         global RECORD
@@ -77,8 +80,8 @@ def setup_amcat4pylogger(
         index (str): Index name to log to. Will be created if it doesn't exist
         level (_type_, optional): Minimum log level. Defaults to logging.INFO.
         copy_console (bool, optional): Also log to stdout? Defaults to True.
-        extra_fields: Optional list of extra fields that should be included in logging. Their values will need to be specified with the log entries.
-        extra_values: Optional dict of extra field:value pairs that should be included. The fields will be included as extra_fields, and the values will be automatically included with every log entry.
+        extra_fields: Optional list of extra fields that should be included in logging. Their values can be specified in the log entries with the `extra=dict` argument .
+        extra_values: Optional dict of extra field:value pairs that should be included. The fields will be included as extra fields, and the values will be automatically included with every log entry.
 
     Returns:
         a Logger object. If extra_values are specified, it will return a LogAdapter that includes the extra values.
@@ -86,8 +89,6 @@ def setup_amcat4pylogger(
     # Set up basic logger
     logger = logging.getLogger(name)
     logger.setLevel(level)
-    extra_fields = extra_fields or []
-    extra_fields += [k for k in extra_values if k not in extra_fields]
 
     # Set up console / stream handler
     if copy_console:
@@ -104,10 +105,11 @@ def setup_amcat4pylogger(
     fields = LOGGING_FIELDS
     if extra_fields:
         fields.update({f: "keyword" for f in extra_fields})
+    if extra_values:
+        fields.update({f: "keyword" for f in extra_values.keys()})
+
     client.set_fields(index, fields)
 
-    handler = AmCATLogHandler(client, index, extra_fields=list(extra_fields))
+    handler = AmCATLogHandler(client, index, extra_fields=extra_fields, extra_values=extra_values)
     logger.addHandler(handler)
-    if extra_values:
-        return logging.LoggerAdapter(logger, extra_values)
     return logger
